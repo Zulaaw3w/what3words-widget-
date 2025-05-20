@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>what3words JotForm Widget</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        }
+        #w3w-container {
+            position: relative;
+            width: 100%;
+        }
+        #w3w-input-wrapper {
+            display: flex;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        #w3w-prefix {
+            background-color: rgba(225,31,38,0.1);
+            color: #e11f26;
+            padding: 8px 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-right: 1px solid #ccc;
+            font-weight: bold;
+        }
+        #w3w-input {
+            border: none;
+            flex: 1;
+            padding: 8px 12px;
+            outline: none;
+            width: 100%;
+            font-size: 14px;
+        }
+        #w3w-suggestions {
+            position: absolute;
+            width: 100%;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-top: 4px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-height: 240px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+        }
+        .w3w-header {
+            padding: 6px 10px;
+            background-color: #f5f5f5;
+            border-bottom: 1px solid #eee;
+            font-size: 11px;
+            color: #666;
+        }
+        .w3w-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+        .w3w-item {
+            padding: 8px 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .w3w-item:hover {
+            background-color: #f9f9f9;
+        }
+        .w3w-item:last-child {
+            border-bottom: none;
+        }
+        .w3w-words {
+            font-weight: 500;
+        }
+        .w3w-location {
+            font-size: 12px;
+            color: #666;
+        }
+        #w3w-error {
+            color: #e11f26;
+            font-size: 12px;
+            margin-top: 4px;
+            display: none;
+        }
+        #w3w-confirmation {
+            background-color: #f0fdf4;
+            border: 1px solid #dcfce7;
+            border-radius: 4px;
+            padding: 12px;
+            margin-top: 12px;
+            display: none;
+        }
+        .w3w-confirm-row {
+            display: flex;
+        }
+        .w3w-confirm-icon {
+            margin-right: 10px;
+        }
+        .w3w-confirm-text .w3w-confirm-words {
+            font-weight: 500;
+        }
+        .w3w-confirm-text .w3w-confirm-coords {
+            font-size: 13px;
+            color: #444;
+        }
+        .w3w-confirm-text .w3w-confirm-location {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+        .w3w-branding {
+            font-size: 11px;
+            color: #666;
+            margin-top: 6px;
+        }
+        .w3w-branding span {
+            color: #e11f26;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div id="w3w-container">
+        <div id="w3w-input-wrapper">
+            <div id="w3w-prefix">///</div>
+            <input type="text" id="w3w-input" placeholder="Enter a what3words address" />
+        </div>
+        <div id="w3w-suggestions"></div>
+        <div id="w3w-error"></div>
+        <div id="w3w-confirmation"></div>
+        <div class="w3w-branding">
+            powered by <span>what3words</span>
+        </div>
+        <input type="hidden" id="w3w-words-value" />
+        <input type="hidden" id="w3w-lat-value" />
+        <input type="hidden" id="w3w-lng-value" />
+    </div>
+
+    <script>
+        (function() {
+            // Replace with your what3words API key
+            const apiKey = '51UT27S1';
+            
+            // DOM elements
+            const input = document.getElementById('w3w-input');
+            const suggestions = document.getElementById('w3w-suggestions');
+            const error = document.getElementById('w3w-error');
+            const confirmation = document.getElementById('w3w-confirmation');
+            const hiddenWords = document.getElementById('w3w-words-value');
+            const hiddenLat = document.getElementById('w3w-lat-value');
+            const hiddenLng = document.getElementById('w3w-lng-value');
+            
+            // Setup JotForm integration
+            function setupJotFormIntegration() {
+                if (window.JFCustomWidget) {
+                    const widget = window.JFCustomWidget;
+                    widget.subscribe('ready', function() {
+                        // Widget is ready, initialize with any saved data
+                        const savedValue = widget.getWidgetSetting('defaultValue');
+                        if (savedValue) {
+                            input.value = savedValue;
+                            // If there's a saved value, validate it
+                            validateSavedValue(savedValue);
+                        }
+                    });
+                    
+                    // Set up submit handler
+                    input.addEventListener('change', function() {
+                        submitValueToJotForm();
+                    });
+                }
+            }
+            
+            // Validate a saved value against the API
+            function validateSavedValue(address) {
+                if (isValidWhat3WordsFormat(address)) {
+                    fetchAddressDetails(address);
+                }
+            }
+            
+            // Submit the current value to JotForm
+            function submitValueToJotForm() {
+                if (window.JFCustomWidget) {
+                    const widget = window.JFCustomWidget;
+                    const data = {
+                        valid: isValidSelection(),
+                        value: input.value,
+                        words: hiddenWords.value,
+                        lat: hiddenLat.value,
+                        lng: hiddenLng.value
+                    };
+                    widget.sendData(data);
+                }
+            }
+            
+            // Check if there's a valid selection made
+            function isValidSelection() {
+                return hiddenWords.value && hiddenWords.value === input.value;
+            }
+            
+            // Check if string matches w3w format
+            function isValidWhat3WordsFormat(address) {
+                return /^[a-zA-Z]+\.[a-zA-Z]+\.[a-zA-Z]+$/.test(address);
+            }
+            
+            // Event listeners
+            input.addEventListener('input', debounce(handleInput, 300));
+            document.addEventListener('click', function(e) {
+                if (!suggestions.contains(e.target) && e.target !== input) {
+                    suggestions.style.display = 'none';
+                }
+            });
+            
+            // Handle input changes
+            function handleInput() {
+                const value = input.value.trim();
+                
+                // Clear error
+                error.style.display = 'none';
+                
+                if (!value || value.length < 3) {
+                    suggestions.style.display = 'none';
+                    return;
+                }
+                
+                // Show loading state
+                suggestions.innerHTML = '<div style="padding: 10px; text-align: center;">Loading suggestions...</div>';
+                suggestions.style.display = 'block';
+                
+                // Fetch suggestions from what3words API
+                fetchSuggestions(value);
+            }
+            
+            // Fetch suggestions from API
+            function fetchSuggestions(query) {
+                const params = new URLSearchParams({
+                    key: apiKey,
+                    input: query,
+                    language: 'en'
+                });
+                
+                fetch(`https://api.what3words.com/v3/autosuggest?${params.toString()}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            handleApiError(data.error);
+                            return;
+                        }
+                        
+                        if (data.suggestions && data.suggestions.length > 0) {
+                            renderSuggestions(data.suggestions);
+                        } else {
+                            suggestions.innerHTML = '<div style="padding: 10px; text-align: center;">No results found</div>';
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Error fetching suggestions:', err);
+                        suggestions.innerHTML = '<div style="padding: 10px; text-align: center; color: #e11f26;">Error loading suggestions</div>';
+                    });
+            }
+            
+            // Fetch specific address details
+            function fetchAddressDetails(address) {
+                const params = new URLSearchParams({
+                    key: apiKey,
+                    words: address
+                });
+                
+                fetch(`https://api.what3words.com/v3/convert-to-coordinates?${params.toString()}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            handleApiError(data.error);
+                            return;
+                        }
+                        
+                        selectSuggestion(
+                            data.words,
+                            data.country,
+                            data.nearestPlace,
+                            data.coordinates.lat,
+                            data.coordinates.lng
+                        );
+                    })
+                    .catch(err => {
+                        console.error('Error fetching address details:', err);
+                        error.textContent = 'Error validating address. Please try again.';
+                        error.style.display = 'block';
+                    });
+            }
+            
+            // Handle API errors
+            function handleApiError(error) {
+                if (error.code === 'InvalidKey') {
+                    error.textContent = 'Invalid API key. Please check your configuration.';
+                } else if (error.code === 'BadWords') {
+                    error.textContent = 'Invalid what3words address.';
+                } else {
+                    error.textContent = error.message || 'An error occurred. Please try again.';
+                }
+                error.style.display = 'block';
+                suggestions.style.display = 'none';
+            }
+            
+            // Render suggestions in dropdown
+            function renderSuggestions(items) {
+                let html = '<div class="w3w-header">Top Suggestions</div>';
+                html += '<ul class="w3w-list">';
+                
+                items.forEach(item => {
+                    html += `
+                        <li class="w3w-item" data-words="${item.words}" data-country="${item.country}" 
+                            data-nearest="${item.nearestPlace}" data-lat="${item.coordinates.lat}" data-lng="${item.coordinates.lng}">
+                            <div class="w3w-words">${item.words}</div>
+                            <div class="w3w-location">${item.nearestPlace}, ${item.country}</div>
+                        </li>
+                    `;
+                });
+                
+                html += '</ul>';
+                suggestions.innerHTML = html;
+                
+                // Add click events to list items
+                const items = suggestions.querySelectorAll('.w3w-item');
+                items.forEach(item => {
+                    item.addEventListener('click', function() {
+                        const words = this.getAttribute('data-words');
+                        const country = this.getAttribute('data-country');
+                        const nearestPlace = this.getAttribute('data-nearest');
+                        const lat = this.getAttribute('data-lat');
+                        const lng = this.getAttribute('data-lng');
+                        
+                        selectSuggestion(words, country, nearestPlace, lat, lng);
+                    });
+                });
+            }
+            
+            // Select a suggestion
+            function selectSuggestion(words, country, nearestPlace, lat, lng) {
+                input.value = words;
+                suggestions.style.display = 'none';
+                
+                // Store values in hidden fields
+                hiddenWords.value = words;
+                hiddenLat.value = lat;
+                hiddenLng.value = lng;
+                
+                // Show confirmation
+                confirmation.innerHTML = `
+                    <div class="w3w-confirm-row">
+                        <div class="w3w-confirm-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                <path d="M22 4L12 14.01l-3-3" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </div>
+                        <div class="w3w-confirm-text">
+                            <div class="w3w-confirm-words">${words}</div>
+                            <div class="w3w-confirm-coords">${parseFloat(lat).toFixed(6)}, ${parseFloat(lng).toFixed(6)}</div>
+                            <div class="w3w-confirm-location">Near ${nearestPlace}, ${country}</div>
+                        </div>
+                    </div>
+                `;
+                confirmation.style.display = 'block';
+                
+                // Send data to JotForm
+                submitValueToJotForm();
+            }
+            
+            // Helper function to debounce API calls
+            function debounce(func, wait) {
+                let timeout;
+                return function() {
+                    const context = this;
+                    const args = arguments;
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => func.apply(context, args), wait);
+                };
+            }
+            
+            // Initialize
+            setupJotFormIntegration();
+        })();
+    </script>
+
+    <!-- JotForm integration script -->
+    <script src="https://js.jotform.com/JotFormCustomWidget.min.js"></script>
+</body>
+</html>
