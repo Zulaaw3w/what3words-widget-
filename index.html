@@ -21,14 +21,16 @@
             overflow: hidden;
         }
         #w3w-prefix {
-            background-color: rgba(225,31,38,0.1);
-            color: #e11f26;
-            padding: 8px 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-right: 1px solid #ccc;
-            font-weight: bold;
+    background-color: #e11f26;
+    color: white;
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-right: 1px solid #ccc;
+    font-weight: bold;
+    min-width: 30px;
+}
         }
         #w3w-input {
             border: none;
@@ -237,32 +239,35 @@
             }
             
             // Fetch suggestions from API
-            function fetchSuggestions(query) {
-                const params = new URLSearchParams({
-                    key: apiKey,
-                    input: query,
-                    language: 'en'
-                });
-                
-                fetch(`https://api.what3words.com/v3/autosuggest?${params.toString()}`)
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.error) {
-                            handleApiError(data.error);
-                            return;
-                        }
-                        
-                        if (data.suggestions && data.suggestions.length > 0) {
-                            renderSuggestions(data.suggestions);
-                        } else {
-                            suggestions.innerHTML = '<div style="padding: 10px; text-align: center;">No results found</div>';
-                        }
-                    })
-                    .catch(err => {
-                        console.error('Error fetching suggestions:', err);
-                        suggestions.innerHTML = '<div style="padding: 10px; text-align: center; color: #e11f26;">Error loading suggestions</div>';
-                    });
+function fetchSuggestions(query) {
+    const params = new URLSearchParams({
+        key: apiKey,
+        input: query,
+        language: 'en',
+        n_results: 5,  // Increase number of results
+        clip_to_country: '',  // Don't limit to a specific country
+        focus: '-24.635,134.208'  // Set a default focus point (Australia)
+    });
+    
+    fetch(`https://api.what3words.com/v3/autosuggest?${params.toString()}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                handleApiError(data.error);
+                return;
             }
+            
+            if (data.suggestions && data.suggestions.length > 0) {
+                renderSuggestions(data.suggestions);
+            } else {
+                suggestions.innerHTML = '<div style="padding: 10px; text-align: center;">No results found</div>';
+            }
+        })
+        .catch(err => {
+            console.error('Error fetching suggestions:', err);
+            suggestions.innerHTML = '<div style="padding: 10px; text-align: center; color: #e11f26;">Error loading suggestions</div>';
+        });
+}
             
             // Fetch specific address details
             function fetchAddressDetails(address) {
