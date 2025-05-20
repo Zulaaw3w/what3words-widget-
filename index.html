@@ -219,16 +219,22 @@
             });
             
             // Handle input changes
-            function handleInput() {
-                const value = input.value.trim();
-                
-                // Clear error
-                error.style.display = 'none';
-                
-                if (!value || value.length < 3) {
-                    suggestions.style.display = 'none';
-                    return;
-                }
+function handleInput() {
+    const value = input.value.trim();
+    console.log('Input value:', value);
+    
+    // Clear error
+    error.style.display = 'none';
+    
+    if (value.length < 3) {
+        console.log('Input too short, need 3+ characters');
+        suggestions.style.display = 'none';
+        return;
+    }
+    
+    // Fetch suggestions from what3words API
+    fetchSuggestions(value);
+}
                 
                 // Show loading state
                 suggestions.innerHTML = '<div style="padding: 10px; text-align: center;">Loading suggestions...</div>';
@@ -240,26 +246,43 @@
             
             // Fetch suggestions from API
 function fetchSuggestions(query) {
+    // Show loading message
+    suggestions.innerHTML = '<div style="padding: 10px; text-align: center;">Loading suggestions...</div>';
+    suggestions.style.display = 'block';
+    
+    // Log for debugging
+    console.log('Fetching suggestions for:', query);
+    
     const params = new URLSearchParams({
         key: apiKey,
         input: query,
         language: 'en',
-        n_results: 5,  // Increase number of results
-        clip_to_country: '',  // Don't limit to a specific country
-        focus: '-24.635,134.208'  // Set a default focus point (Australia)
+        n_results: 5,  // Request 5 results
+        clip_to_country: ''  // Don't limit to specific country
     });
     
-    fetch(`https://api.what3words.com/v3/autosuggest?${params.toString()}`)
-        .then(response => response.json())
+    const url = `https://api.what3words.com/v3/autosuggest?${params.toString()}`;
+    console.log('Request URL:', url);
+    
+    fetch(url)
+        .then(response => {
+            console.log('Response status:', response.status);
+            return response.json();
+        })
         .then(data => {
+            console.log('API response data:', data);
+            
             if (data.error) {
+                console.error('API returned error:', data.error);
                 handleApiError(data.error);
                 return;
             }
             
             if (data.suggestions && data.suggestions.length > 0) {
+                console.log('Rendering suggestions:', data.suggestions.length);
                 renderSuggestions(data.suggestions);
             } else {
+                console.log('No suggestions found');
                 suggestions.innerHTML = '<div style="padding: 10px; text-align: center;">No results found</div>';
             }
         })
@@ -267,6 +290,7 @@ function fetchSuggestions(query) {
             console.error('Error fetching suggestions:', err);
             suggestions.innerHTML = '<div style="padding: 10px; text-align: center; color: #e11f26;">Error loading suggestions</div>';
         });
+}
 }
             
             // Fetch specific address details
