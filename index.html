@@ -315,6 +315,7 @@
             // Widget state
             let apiKey = '';
             let isConfigured = false;
+            let selectedData = null;
             
             // DOM elements
             const input = document.getElementById('w3wInput');
@@ -592,6 +593,14 @@
                 // Update input
                 input.value = item.words;
                 
+                // Store selected data
+                selectedData = {
+                    words: item.words,
+                    country: item.country,
+                    nearestPlace: item.nearestPlace,
+                    coordinates: item.coordinates
+                };
+                
                 // Hide suggestions
                 suggestions.style.display = 'none';
                 
@@ -607,21 +616,27 @@
                 `;
                 confirmation.style.display = 'block';
                 
-                // If JotForm integration is available, send the data
+                // Notify JotForm of value change
                 if (window.parent && window.parent.postMessage) {
-                    try {
-                        const data = {
-                            words: item.words,
-                            country: item.country,
-                            nearestPlace: item.nearestPlace,
-                            coordinates: item.coordinates
-                        };
-                        window.parent.postMessage(JSON.stringify(data), '*');
-                    } catch (e) {
-                        console.error('Error sending data to parent:', e);
-                    }
+                    window.parent.postMessage({
+                        type: 'widget-value-changed',
+                        value: JSON.stringify(selectedData)
+                    }, '*');
                 }
             }
+            
+            // Listen for JotForm widget value requests
+            window.addEventListener('message', function(event) {
+                if (event.data.type === 'widget-get-value') {
+                    // Return the current widget value to JotForm
+                    const currentValue = selectedData ? JSON.stringify(selectedData) : '';
+                    
+                    event.source.postMessage({
+                        type: 'widget-value',
+                        value: currentValue
+                    }, event.origin);
+                }
+            });
             
             // Initialize the widget
             init();
