@@ -311,38 +311,66 @@
     </div>
 
     <script>
-        (function() {
-            var widgetData = '';
-            var apiKey = '';
-            var isConfigured = false;
-            var lastRequestId = 0;
+        // Global widget value - this is what JotForm will read
+        var JF_WIDGET_VALUE = '';
+        
+        // JotForm expects these exact function signatures
+        function sendSubmit(value) {
+            // Called when widget wants to submit its value
+            if (typeof parent !== 'undefined' && parent.postMessage) {
+                parent.postMessage(JSON.stringify({
+                    type: 'submit',
+                    value: value || JF_WIDGET_VALUE
+                }), '*');
+            }
+        }
+        
+        function sendData(data) {
+            // Called when widget data changes
+            JF_WIDGET_VALUE = data;
+            if (typeof parent !== 'undefined' && parent.postMessage) {
+                parent.postMessage(JSON.stringify({
+                    type: 'data',
+                    value: data
+                }), '*');
+            }
+        }
+        
+        // Widget state
+        var apiKey = '';
+        var isConfigured = false;
+        var lastRequestId = 0;
+        
+        // DOM elements
+        var input = document.getElementById('w3wInput');
+        var suggestions = document.getElementById('w3wSuggestions');
+        var confirmation = document.getElementById('w3wConfirmation');
+        var apiStatus = document.getElementById('w3wApiStatus');
+        var configBtn = document.getElementById('w3wConfigBtn');
+        var configModal = document.getElementById('w3wConfigModal');
+        var apiKeyInput = document.getElementById('w3wApiKeyInput');
+        var saveBtn = document.getElementById('w3wSaveBtn');
+        var cancelBtn = document.getElementById('w3wCancelBtn');
+        var configError = document.getElementById('w3wConfigError');
+        
+        function init() {
+            var savedApiKey = localStorage.getItem('what3words_api_key');
+            if (savedApiKey) {
+                setApiKey(savedApiKey);
+            }
             
-            // DOM elements
-            var input = document.getElementById('w3wInput');
-            var suggestions = document.getElementById('w3wSuggestions');
-            var confirmation = document.getElementById('w3wConfirmation');
-            var apiStatus = document.getElementById('w3wApiStatus');
-            var configBtn = document.getElementById('w3wConfigBtn');
-            var configModal = document.getElementById('w3wConfigModal');
-            var apiKeyInput = document.getElementById('w3wApiKeyInput');
-            var saveBtn = document.getElementById('w3wSaveBtn');
-            var cancelBtn = document.getElementById('w3wCancelBtn');
-            var configError = document.getElementById('w3wConfigError');
+            configBtn.addEventListener('click', openConfigModal);
+            input.addEventListener('input', handleInput);
+            cancelBtn.addEventListener('click', closeConfigModal);
+            saveBtn.addEventListener('click', saveConfiguration);
             
-            // JotForm expects these exact function names
-            window.getWidgetValue = function() {
-                return widgetData;
-            };
+            document.addEventListener('click', function(e) {
+                if (e.target !== input && !suggestions.contains(e.target)) {
+                    suggestions.style.display = 'none';
+                }
+            });
             
-            window.setWidgetValue = function(value) {
-                widgetData = value || '';
-            };
-            
-            window.validateWidget = function() {
-                return widgetData !== '';
-            };
-            
-            // Handle JotForm communication
+            // Handle postMessage from JotForm
             window.addEventListener('message', function(event) {
                 var data = event.data;
                 if (typeof data === 'string') {
@@ -353,241 +381,220 @@
                     }
                 }
                 
-                if (data && data.type === 'widget-get-value') {
-                    window.parent.postMessage(JSON.stringify({
-                        type: 'widget-value',
-                        value: widgetData
-                    }), '*');
+                if (data && data.type === 'get') {
+                    // JotForm is requesting our value
+                    sendData(JF_WIDGET_VALUE);
                 }
             });
             
-            function init() {
-                var savedApiKey = localStorage.getItem('what3words_api_key');
-                if (savedApiKey) {
-                    setApiKey(savedApiKey);
+            // Signal to JotForm that we're ready
+            setTimeout(function() {
+                if (typeof parent !== 'undefined' && parent.postMessage) {
+                    parent.postMessage(JSON.stringify({type: 'ready'}), '*');
                 }
-                
-                configBtn.addEventListener('click', openConfigModal);
-                input.addEventListener('input', handleInput);
-                cancelBtn.addEventListener('click', closeConfigModal);
-                saveBtn.addEventListener('click', saveConfiguration);
-                
-                document.addEventListener('click', function(e) {
-                    if (e.target !== input && !suggestions.contains(e.target)) {
-                        suggestions.style.display = 'none';
+            }, 500);
+        }
+        
+        function setApiKey(key) {
+            apiKey = key;
+            isConfigured = true;
+            updateApiStatus();
+            enableWidget();
+        }
+        
+        function updateApiStatus() {
+            if (isConfigured) {
+                apiStatus.className = 'w3w-api-status w3w-api-success';
+                apiStatus.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between;"><div><div style="font-weight: 600; margin-bottom: 4px;">API Configuration Complete</div><div>what3words API is connected and ready to use</div></div><button id="w3wConfigBtn" class="w3w-config-btn">Configure</button></div>';
+                document.getElementById('w3wConfigBtn').addEventListener('click', openConfigModal);
+            }
+        }
+        
+        function enableWidget() {
+            input.disabled = false;
+        }
+        
+        function openConfigModal() {
+            configModal.classList.remove('hidden');
+            apiKeyInput.value = '';
+            configError.classList.add('hidden');
+        }
+        
+        function closeConfigModal() {
+            configModal.classList.add('hidden');
+        }
+        
+        function saveConfiguration() {
+            var apiKeyValue = apiKeyInput.value.trim();
+            
+            if (!apiKeyValue) {
+                showConfigError('Please enter your API key');
+                return;
+            }
+            
+            saveBtn.innerHTML = '<div class="w3w-loading"></div>';
+            
+            fetch('https://api.what3words.com/v3/convert-to-coordinates?words=index.home.raft&key=' + apiKeyValue + '&format=json')
+                .then(function(response) {
+                    if (response.status === 401) {
+                        throw new Error('Invalid API key');
                     }
+                    if (!response.ok) {
+                        throw new Error('Failed to validate API key');
+                    }
+                    localStorage.setItem('what3words_api_key', apiKeyValue);
+                    setApiKey(apiKeyValue);
+                    closeConfigModal();
+                    showToast('API key configured successfully!');
+                })
+                .catch(function(error) {
+                    showConfigError(error.message);
+                })
+                .finally(function() {
+                    saveBtn.innerHTML = '<span>Save Configuration</span>';
                 });
-                
-                // Tell JotForm we're ready
-                setTimeout(function() {
-                    window.parent.postMessage(JSON.stringify({type: 'widget-ready'}), '*');
-                }, 100);
+        }
+        
+        function showConfigError(message) {
+            configError.textContent = message;
+            configError.classList.remove('hidden');
+        }
+        
+        function showToast(message) {
+            var toast = document.createElement('div');
+            toast.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #16a34a; color: white; padding: 12px 20px; border-radius: 6px; z-index: 1000; font-size: 14px;';
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(function() {
+                toast.remove();
+            }, 3000);
+        }
+        
+        function handleInput() {
+            if (!isConfigured) {
+                openConfigModal();
+                return;
             }
             
-            function setApiKey(key) {
-                apiKey = key;
-                isConfigured = true;
-                updateApiStatus();
-                enableWidget();
-            }
+            var value = input.value.trim();
             
-            function updateApiStatus() {
-                if (isConfigured) {
-                    apiStatus.className = 'w3w-api-status w3w-api-success';
-                    apiStatus.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between;"><div><div style="font-weight: 600; margin-bottom: 4px;">API Configuration Complete</div><div>what3words API is connected and ready to use</div></div><button id="w3wConfigBtn" class="w3w-config-btn">Configure</button></div>';
-                    document.getElementById('w3wConfigBtn').addEventListener('click', openConfigModal);
-                }
-            }
-            
-            function enableWidget() {
-                input.disabled = false;
-            }
-            
-            function openConfigModal() {
-                configModal.classList.remove('hidden');
-                apiKeyInput.value = '';
-                configError.classList.add('hidden');
-            }
-            
-            function closeConfigModal() {
-                configModal.classList.add('hidden');
-            }
-            
-            function saveConfiguration() {
-                var apiKeyValue = apiKeyInput.value.trim();
-                
-                if (!apiKeyValue) {
-                    showConfigError('Please enter your API key');
-                    return;
-                }
-                
-                saveBtn.innerHTML = '<div class="w3w-loading"></div>';
-                
-                fetch('https://api.what3words.com/v3/convert-to-coordinates?words=index.home.raft&key=' + apiKeyValue + '&format=json')
-                    .then(function(response) {
-                        if (response.status === 401) {
-                            throw new Error('Invalid API key');
-                        }
-                        if (!response.ok) {
-                            throw new Error('Failed to validate API key');
-                        }
-                        localStorage.setItem('what3words_api_key', apiKeyValue);
-                        setApiKey(apiKeyValue);
-                        closeConfigModal();
-                        showToast('API key configured successfully!');
-                    })
-                    .catch(function(error) {
-                        showConfigError(error.message);
-                    })
-                    .finally(function() {
-                        saveBtn.innerHTML = '<span>Save Configuration</span>';
-                    });
-            }
-            
-            function showConfigError(message) {
-                configError.textContent = message;
-                configError.classList.remove('hidden');
-            }
-            
-            function showToast(message) {
-                var toast = document.createElement('div');
-                toast.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #16a34a; color: white; padding: 12px 20px; border-radius: 6px; z-index: 1000; font-size: 14px;';
-                toast.textContent = message;
-                document.body.appendChild(toast);
-                
-                setTimeout(function() {
-                    toast.remove();
-                }, 3000);
-            }
-            
-            function handleInput() {
-                if (!isConfigured) {
-                    openConfigModal();
-                    return;
-                }
-                
-                var value = input.value.trim();
-                
-                if (value.length < 3) {
-                    suggestions.style.display = 'none';
-                    return;
-                }
-                
-                var requestId = ++lastRequestId;
-                getSuggestions(value, requestId);
-            }
-            
-            function getSuggestions(query, requestId) {
-                if (query.toLowerCase().indexOf('fill') === 0) {
-                    suggestions.innerHTML = '<div class="w3w-suggestion">Loading suggestions...</div>';
-                    suggestions.style.display = 'block';
-                    
-                    var exampleSuggestions = [
-                        {
-                            words: "filled.count.soap",
-                            country: "United Kingdom",
-                            nearestPlace: "London",
-                            coordinates: { lat: 51.520847, lng: -0.195521 }
-                        },
-                        {
-                            words: "filled.decent.basic",
-                            country: "Japan",
-                            nearestPlace: "Tokyo",
-                            coordinates: { lat: 35.6762, lng: 139.6503 }
-                        },
-                        {
-                            words: "filled.brings.forget",
-                            country: "Mongolia",
-                            nearestPlace: "Ulaanbaatar",
-                            coordinates: { lat: 47.8864, lng: 106.9057 }
-                        }
-                    ];
-                    
-                    renderSuggestions(exampleSuggestions);
-                    return;
-                }
-                
-                var url = 'https://api.what3words.com/v3/autosuggest?key=' + apiKey + '&input=' + encodeURIComponent(query) + '&n_results=5';
-                
-                fetch(url)
-                    .then(function(response) { return response.json(); })
-                    .then(function(data) {
-                        if (requestId !== lastRequestId) return;
-                        
-                        if (data.suggestions && data.suggestions.length > 0) {
-                            renderSuggestions(data.suggestions);
-                        } else {
-                            suggestions.innerHTML = '<div class="w3w-suggestion">No results found</div>';
-                            suggestions.style.display = 'block';
-                        }
-                    })
-                    .catch(function() {
-                        suggestions.innerHTML = '<div class="w3w-suggestion">Error loading suggestions</div>';
-                        suggestions.style.display = 'block';
-                    });
-            }
-            
-            function renderSuggestions(items) {
-                suggestions.innerHTML = '';
-                
-                for (var i = 0; i < items.length; i++) {
-                    var item = items[i];
-                    var suggestionEl = document.createElement('div');
-                    suggestionEl.className = 'w3w-suggestion';
-                    
-                    var wordsEl = document.createElement('div');
-                    wordsEl.className = 'w3w-words';
-                    wordsEl.textContent = item.words;
-                    
-                    var locationEl = document.createElement('div');
-                    locationEl.className = 'w3w-location';
-                    locationEl.textContent = item.nearestPlace + ', ' + item.country;
-                    
-                    suggestionEl.appendChild(wordsEl);
-                    suggestionEl.appendChild(locationEl);
-                    
-                    (function(itemData) {
-                        suggestionEl.addEventListener('click', function() {
-                            selectSuggestion(itemData);
-                        });
-                    })(item);
-                    
-                    suggestions.appendChild(suggestionEl);
-                }
-                
-                suggestions.style.display = 'block';
-            }
-            
-            function selectSuggestion(item) {
-                input.value = item.words;
-                
-                var locationData = {
-                    words: item.words,
-                    country: item.country,
-                    nearestPlace: item.nearestPlace,
-                    coordinates: item.coordinates
-                };
-                
-                widgetData = JSON.stringify(locationData);
-                
+            if (value.length < 3) {
                 suggestions.style.display = 'none';
-                
-                confirmation.innerHTML = '<div class="w3w-selected"><div class="w3w-words">' + item.words + '</div><div class="w3w-location">' + item.nearestPlace + ', ' + item.country + '<br>' + item.coordinates.lat.toFixed(6) + ', ' + item.coordinates.lng.toFixed(6) + '</div></div>';
-                confirmation.style.display = 'block';
-                
-                // Notify JotForm
-                window.parent.postMessage(JSON.stringify({
-                    type: 'widget-value-changed',
-                    value: widgetData
-                }), '*');
+                return;
             }
             
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', init);
-            } else {
-                init();
+            var requestId = ++lastRequestId;
+            getSuggestions(value, requestId);
+        }
+        
+        function getSuggestions(query, requestId) {
+            if (query.toLowerCase().indexOf('fill') === 0) {
+                suggestions.innerHTML = '<div class="w3w-suggestion">Loading suggestions...</div>';
+                suggestions.style.display = 'block';
+                
+                var exampleSuggestions = [
+                    {
+                        words: "filled.count.soap",
+                        country: "United Kingdom",
+                        nearestPlace: "London",
+                        coordinates: { lat: 51.520847, lng: -0.195521 }
+                    },
+                    {
+                        words: "filled.decent.basic",
+                        country: "Japan",
+                        nearestPlace: "Tokyo",
+                        coordinates: { lat: 35.6762, lng: 139.6503 }
+                    },
+                    {
+                        words: "filled.brings.forget",
+                        country: "Mongolia",
+                        nearestPlace: "Ulaanbaatar",
+                        coordinates: { lat: 47.8864, lng: 106.9057 }
+                    }
+                ];
+                
+                renderSuggestions(exampleSuggestions);
+                return;
             }
-        })();
+            
+            var url = 'https://api.what3words.com/v3/autosuggest?key=' + apiKey + '&input=' + encodeURIComponent(query) + '&n_results=5';
+            
+            fetch(url)
+                .then(function(response) { return response.json(); })
+                .then(function(data) {
+                    if (requestId !== lastRequestId) return;
+                    
+                    if (data.suggestions && data.suggestions.length > 0) {
+                        renderSuggestions(data.suggestions);
+                    } else {
+                        suggestions.innerHTML = '<div class="w3w-suggestion">No results found</div>';
+                        suggestions.style.display = 'block';
+                    }
+                })
+                .catch(function() {
+                    suggestions.innerHTML = '<div class="w3w-suggestion">Error loading suggestions</div>';
+                    suggestions.style.display = 'block';
+                });
+        }
+        
+        function renderSuggestions(items) {
+            suggestions.innerHTML = '';
+            
+            for (var i = 0; i < items.length; i++) {
+                var item = items[i];
+                var suggestionEl = document.createElement('div');
+                suggestionEl.className = 'w3w-suggestion';
+                
+                var wordsEl = document.createElement('div');
+                wordsEl.className = 'w3w-words';
+                wordsEl.textContent = item.words;
+                
+                var locationEl = document.createElement('div');
+                locationEl.className = 'w3w-location';
+                locationEl.textContent = item.nearestPlace + ', ' + item.country;
+                
+                suggestionEl.appendChild(wordsEl);
+                suggestionEl.appendChild(locationEl);
+                
+                (function(itemData) {
+                    suggestionEl.addEventListener('click', function() {
+                        selectSuggestion(itemData);
+                    });
+                })(item);
+                
+                suggestions.appendChild(suggestionEl);
+            }
+            
+            suggestions.style.display = 'block';
+        }
+        
+        function selectSuggestion(item) {
+            input.value = item.words;
+            
+            var locationData = {
+                words: item.words,
+                country: item.country,
+                nearestPlace: item.nearestPlace,
+                coordinates: item.coordinates
+            };
+            
+            var dataString = JSON.stringify(locationData);
+            
+            suggestions.style.display = 'none';
+            
+            confirmation.innerHTML = '<div class="w3w-selected"><div class="w3w-words">' + item.words + '</div><div class="w3w-location">' + item.nearestPlace + ', ' + item.country + '<br>' + item.coordinates.lat.toFixed(6) + ', ' + item.coordinates.lng.toFixed(6) + '</div></div>';
+            confirmation.style.display = 'block';
+            
+            // Update widget value and notify JotForm
+            sendData(dataString);
+        }
+        
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
     </script>
 </body>
 </html>
