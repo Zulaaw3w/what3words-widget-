@@ -311,12 +311,12 @@
     </div>
 
     <script>
-        (function() {
-            // Widget state
+        var JotFormWidget = (function() {
             var widgetValue = '';
             var lastRequestId = 0;
             var apiKey = '';
             var isConfigured = false;
+            var debounceTimer = null;
             
             // DOM elements
             var input = document.getElementById('w3wInput');
@@ -330,49 +330,67 @@
             var cancelBtn = document.getElementById('w3wCancelBtn');
             var configError = document.getElementById('w3wConfigError');
             
-            // JotForm widget functions - these are required by JotForm
-            window.sendSubmit = function(value) {
-                if (window.parent && window.parent.postMessage) {
-                    window.parent.postMessage({
-                        type: 'widget-submit',
-                        value: value || widgetValue
-                    }, '*');
-                }
-            };
-            
-            window.sendData = function(data) {
-                widgetValue = data;
-                if (window.parent && window.parent.postMessage) {
-                    window.parent.postMessage({
-                        type: 'widget-data',
+            // JotForm widget API - using exact function signatures JotForm expects
+            function sendSubmit(value) {
+                var data = value || widgetValue;
+                try {
+                    window.parent.postMessage(JSON.stringify({
+                        type: 'submit',
                         value: data
-                    }, '*');
+                    }), '*');
+                } catch (e) {
+                    console.log('sendSubmit error:', e);
                 }
-            };
+            }
             
-            window.getWidgetValue = function() { 
-                return widgetValue; 
-            };
+            function sendData(data) {
+                widgetValue = data;
+                try {
+                    window.parent.postMessage(JSON.stringify({
+                        type: 'data',
+                        value: data
+                    }), '*');
+                } catch (e) {
+                    console.log('sendData error:', e);
+                }
+            }
             
-            window.setWidgetValue = function(value) { 
-                widgetValue = value || ''; 
-            };
+            function getWidgetValue() {
+                return widgetValue;
+            }
             
-            window.validateWidget = function() { 
-                return widgetValue.length > 0; 
-            };
+            function setWidgetValue(value) {
+                widgetValue = value || '';
+                if (widgetValue) {
+                    try {
+                        var data = JSON.parse(widgetValue);
+                        input.value = data.words || '';
+                        showConfirmation(data);
+                    } catch (e) {
+                        input.value = widgetValue;
+                    }
+                }
+            }
             
-            // Initialize widget
+            function validateWidget() {
+                return widgetValue !== '';
+            }
+            
+            // Make functions globally available for JotForm
+            window.sendSubmit = sendSubmit;
+            window.sendData = sendData;
+            window.getWidgetValue = getWidgetValue;
+            window.setWidgetValue = setWidgetValue;
+            window.validateWidget = validateWidget;
+            
             function init() {
-                // Check for saved API key
                 var savedApiKey = localStorage.getItem('what3words_api_key');
                 if (savedApiKey) {
                     setApiKey(savedApiKey);
                 }
                 
-                // Event listeners
                 configBtn.addEventListener('click', openConfigModal);
-                input.addEventListener('input', handleInput);
+                input.addEventListener('input', handleInputWithDebounce);
                 cancelBtn.addEventListener('click', closeConfigModal);
                 saveBtn.addEventListener('click', saveConfiguration);
                 
@@ -386,7 +404,6 @@
             }
             
             function setupJotFormCommunication() {
-                // Handle messages from JotForm
                 window.addEventListener('message', function(event) {
                     if (!event.data) return;
                     
@@ -399,37 +416,27 @@
                         }
                     }
                     
-                    switch (data.type) {
-                        case 'widget-get-value':
-                        case 'get-value':
-                        case 'get':
-                            if (event.source && event.source.postMessage) {
-                                event.source.postMessage({
-                                    type: 'widget-value',
-                                    value: widgetValue
-                                }, event.origin);
-                            }
-                            break;
-                        case 'widget-validate':
-                        case 'validate':
-                            if (event.source && event.source.postMessage) {
-                                event.source.postMessage({
-                                    type: 'widget-validation',
-                                    isValid: window.validateWidget()
-                                }, event.origin);
-                            }
-                            break;
+                    if (data.type === 'get' || data.type === 'widget-get-value') {
+                        try {
+                            event.source.postMessage(JSON.stringify({
+                                type: 'value',
+                                value: widgetValue
+                            }), event.origin);
+                        } catch (e) {
+                            console.log('Response error:', e);
+                        }
                     }
                 });
                 
-                // Tell JotForm we're ready
                 setTimeout(function() {
-                    if (window.parent && window.parent.postMessage) {
-                        window.parent.postMessage({
-                            type: 'widget-ready'
-                        }, '*');
+                    try {
+                        window.parent.postMessage(JSON.stringify({
+                            type: 'ready'
+                        }), '*');
+                    } catch (e) {
+                        console.log('Ready signal error:', e);
                     }
-                }, 500);
+                }, 100);
             }
             
             function setApiKey(key) {
@@ -471,14 +478,16 @@
                 
                 saveBtn.innerHTML = '<div class="w3w-loading"></div>';
                 
-                // Test the API key
                 fetch('https://api.what3words.com/v3/convert-to-coordinates?words=index.home.raft&key=' + apiKeyValue + '&format=json')
                     .then(function(response) {
                         if (response.status === 401) {
-                            throw new Error('Invalid API key');
+                            throw new Error('Invalid API key - please check your key from what3words.com/developers');
+                        }
+                        if (response.status === 403) {
+                            throw new Error('API key access denied - please verify your account permissions');
                         }
                         if (!response.ok) {
-                            throw new Error('Failed to validate API key');
+                            throw new Error('Failed to validate API key - status: ' + response.status);
                         }
                         return response.json();
                     })
@@ -512,6 +521,16 @@
                 }, 3000);
             }
             
+            function handleInputWithDebounce() {
+                if (debounceTimer) {
+                    clearTimeout(debounceTimer);
+                }
+                
+                debounceTimer = setTimeout(function() {
+                    handleInput();
+                }, 300);
+            }
+            
             function handleInput() {
                 if (!isConfigured) {
                     openConfigModal();
@@ -530,7 +549,7 @@
             
             function getSuggestions(query, requestId) {
                 if (!apiKey) {
-                    suggestions.innerHTML = '<div class="w3w-suggestion">API key not configured</div>';
+                    suggestions.innerHTML = '<div class="w3w-suggestion">Please configure your API key first</div>';
                     suggestions.style.display = 'block';
                     return;
                 }
@@ -538,28 +557,31 @@
                 suggestions.innerHTML = '<div class="w3w-suggestion">Loading suggestions...</div>';
                 suggestions.style.display = 'block';
                 
-                var url = 'https://api.what3words.com/v3/autosuggest?key=' + apiKey + '&input=' + encodeURIComponent(query) + '&n_results=5';
+                var url = 'https://api.what3words.com/v3/autosuggest?key=' + apiKey + '&input=' + encodeURIComponent(query) + '&n_results=5&format=json';
                 
                 fetch(url)
-                    .then(function(response) { 
-                        return response.json(); 
+                    .then(function(response) {
+                        if (!response.ok) {
+                            throw new Error('API request failed: ' + response.status);
+                        }
+                        return response.json();
                     })
                     .then(function(data) {
                         if (requestId !== lastRequestId) return;
                         
-                        if (data.suggestions && data.suggestions.length > 0) {
-                            renderSuggestions(data.suggestions);
-                        } else if (data.error) {
-                            suggestions.innerHTML = '<div class="w3w-suggestion">Error: ' + data.error.message + '</div>';
+                        if (data.error) {
+                            suggestions.innerHTML = '<div class="w3w-suggestion">API Error: ' + data.error.message + '</div>';
                             suggestions.style.display = 'block';
+                        } else if (data.suggestions && data.suggestions.length > 0) {
+                            renderSuggestions(data.suggestions);
                         } else {
-                            suggestions.innerHTML = '<div class="w3w-suggestion">No results found</div>';
+                            suggestions.innerHTML = '<div class="w3w-suggestion">No results found for "' + query + '"</div>';
                             suggestions.style.display = 'block';
                         }
                     })
                     .catch(function(error) {
                         if (requestId !== lastRequestId) return;
-                        suggestions.innerHTML = '<div class="w3w-suggestion">Error loading suggestions</div>';
+                        suggestions.innerHTML = '<div class="w3w-suggestion">Connection error: ' + error.message + '</div>';
                         suggestions.style.display = 'block';
                     });
             }
@@ -599,7 +621,6 @@
                 input.value = item.words;
                 suggestions.style.display = 'none';
                 
-                // Get detailed coordinates
                 var url = 'https://api.what3words.com/v3/convert-to-coordinates?words=' + encodeURIComponent(item.words) + '&key=' + apiKey + '&format=json';
                 
                 fetch(url)
@@ -620,11 +641,10 @@
                             
                             var dataString = JSON.stringify(locationData);
                             showConfirmation(locationData);
-                            window.sendData(dataString);
+                            sendData(dataString);
                         }
                     })
                     .catch(function(error) {
-                        // Fallback with basic data
                         var basicData = { 
                             words: item.words, 
                             country: item.country, 
@@ -633,7 +653,7 @@
                         
                         var dataString = JSON.stringify(basicData);
                         showConfirmation(basicData);
-                        window.sendData(dataString);
+                        sendData(dataString);
                     });
             }
             
@@ -647,12 +667,18 @@
                 confirmation.style.display = 'block';
             }
             
-            // Initialize the widget
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', init);
             } else {
                 init();
             }
+            
+            return {
+                init: init,
+                getWidgetValue: getWidgetValue,
+                setWidgetValue: setWidgetValue,
+                validateWidget: validateWidget
+            };
         })();
     </script>
 </body>
