@@ -311,11 +311,11 @@
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
+        (function() {
             // Widget state
             let apiKey = '';
             let isConfigured = false;
-            let selectedData = null;
+            let widgetValue = '';
             
             // DOM elements
             const input = document.getElementById('w3wInput');
@@ -331,6 +331,20 @@
             
             // Track which request is the most recent
             let lastRequestId = 0;
+            
+            // JotForm Widget API
+            window.JFCustomWidget = {
+                sendSubmit: function(value) {
+                    if (typeof JFCustomWidget.onComplete === 'function') {
+                        JFCustomWidget.onComplete(value);
+                    }
+                },
+                sendData: function(data) {
+                    if (typeof JFCustomWidget.onUpdate === 'function') {
+                        JFCustomWidget.onUpdate(data);
+                    }
+                }
+            };
             
             // Initialize widget
             function init() {
@@ -352,6 +366,39 @@
                         suggestions.style.display = 'none';
                     }
                 });
+                
+                // Initialize JotForm communication
+                setupJotFormCommunication();
+            }
+            
+            function setupJotFormCommunication() {
+                // Listen for JotForm messages
+                window.addEventListener('message', function(event) {
+                    if (event.data && event.data.type) {
+                        switch(event.data.type) {
+                            case 'widget-get-value':
+                                event.source.postMessage({
+                                    type: 'widget-value',
+                                    value: widgetValue
+                                }, event.origin);
+                                break;
+                                
+                            case 'widget-validate':
+                                event.source.postMessage({
+                                    type: 'widget-validation',
+                                    isValid: !!widgetValue
+                                }, event.origin);
+                                break;
+                        }
+                    }
+                });
+                
+                // Tell parent we're ready
+                if (window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'widget-ready'
+                    }, '*');
+                }
             }
             
             function setApiKey(key) {
@@ -593,13 +640,13 @@
                 // Update input
                 input.value = item.words;
                 
-                // Store selected data
-                selectedData = {
+                // Store widget value
+                widgetValue = JSON.stringify({
                     words: item.words,
                     country: item.country,
                     nearestPlace: item.nearestPlace,
                     coordinates: item.coordinates
-                };
+                });
                 
                 // Hide suggestions
                 suggestions.style.display = 'none';
@@ -616,31 +663,27 @@
                 `;
                 confirmation.style.display = 'block';
                 
-                // Notify JotForm of value change
-                if (window.parent && window.parent.postMessage) {
+                // Notify JotForm
+                if (window.parent !== window) {
                     window.parent.postMessage({
                         type: 'widget-value-changed',
-                        value: JSON.stringify(selectedData)
+                        value: widgetValue
                     }, '*');
+                }
+                
+                // Use JFCustomWidget if available
+                if (window.JFCustomWidget) {
+                    window.JFCustomWidget.sendData(widgetValue);
                 }
             }
             
-            // Listen for JotForm widget value requests
-            window.addEventListener('message', function(event) {
-                if (event.data.type === 'widget-get-value') {
-                    // Return the current widget value to JotForm
-                    const currentValue = selectedData ? JSON.stringify(selectedData) : '';
-                    
-                    event.source.postMessage({
-                        type: 'widget-value',
-                        value: currentValue
-                    }, event.origin);
-                }
-            });
-            
-            // Initialize the widget
-            init();
-        });
+            // Initialize the widget when DOM is ready
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', init);
+            } else {
+                init();
+            }
+        })();
     </script>
 </body>
 </html>
