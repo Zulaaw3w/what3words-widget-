@@ -311,12 +311,19 @@
     </div>
 
     <script>
-        var JotFormWidget = (function() {
-            var widgetValue = '';
-            var lastRequestId = 0;
+        (function() {
+            // Critical: Get JotForm field name from URL parameters
+            var urlParams = new URLSearchParams(window.location.search);
+            var fieldName = urlParams.get('name') || 'w3w_field'; // JotForm passes this as ?name=fieldName
+            var formID = urlParams.get('formID');
+            
+            console.log('JotForm Integration - Field Name:', fieldName, 'Form ID:', formID);
+            
+            // Widget state
             var apiKey = '';
             var isConfigured = false;
             var debounceTimer = null;
+            var lastRequestId = 0;
             
             // DOM elements
             var input = document.getElementById('w3wInput');
@@ -330,67 +337,49 @@
             var cancelBtn = document.getElementById('w3wCancelBtn');
             var configError = document.getElementById('w3wConfigError');
             
-            // JotForm widget API - using exact function signatures JotForm expects
-            function sendSubmit(value) {
-                var data = value || widgetValue;
+            // JotForm communication functions
+            function sendReadySignal() {
                 try {
-                    window.parent.postMessage(JSON.stringify({
-                        type: 'submit',
-                        value: data
-                    }), '*');
+                    var payload = { name: fieldName + '_ready' };
+                    console.log('Sending ready signal to JotForm:', payload);
+                    window.parent.postMessage(payload, '*');
                 } catch (e) {
-                    console.log('sendSubmit error:', e);
+                    console.error('Error sending ready signal:', e);
                 }
             }
             
-            function sendData(data) {
-                widgetValue = data;
+            function sendValueToJotForm(value) {
                 try {
-                    window.parent.postMessage(JSON.stringify({
-                        type: 'data',
-                        value: data
-                    }), '*');
+                    var payload = { 
+                        name: fieldName, 
+                        value: value 
+                    };
+                    console.log('Sending value to JotForm:', payload);
+                    window.parent.postMessage(payload, '*');
                 } catch (e) {
-                    console.log('sendData error:', e);
+                    console.error('Error sending value to JotForm:', e);
                 }
             }
-            
-            function getWidgetValue() {
-                return widgetValue;
-            }
-            
-            function setWidgetValue(value) {
-                widgetValue = value || '';
-                if (widgetValue) {
-                    try {
-                        var data = JSON.parse(widgetValue);
-                        input.value = data.words || '';
-                        showConfirmation(data);
-                    } catch (e) {
-                        input.value = widgetValue;
-                    }
-                }
-            }
-            
-            function validateWidget() {
-                return widgetValue !== '';
-            }
-            
-            // Make functions globally available for JotForm
-            window.sendSubmit = sendSubmit;
-            window.sendData = sendData;
-            window.getWidgetValue = getWidgetValue;
-            window.setWidgetValue = setWidgetValue;
-            window.validateWidget = validateWidget;
             
             function init() {
+                console.log('Initializing what3words widget...');
+                
+                // Check for saved API key
                 var savedApiKey = localStorage.getItem('what3words_api_key');
                 if (savedApiKey) {
                     setApiKey(savedApiKey);
+                } else {
+                    console.log('No saved API key found');
                 }
                 
+                // Event listeners
                 configBtn.addEventListener('click', openConfigModal);
                 input.addEventListener('input', handleInputWithDebounce);
+                input.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        handleDirectEntry();
+                    }
+                });
                 cancelBtn.addEventListener('click', closeConfigModal);
                 saveBtn.addEventListener('click', saveConfiguration);
                 
@@ -400,43 +389,10 @@
                     }
                 });
                 
-                setupJotFormCommunication();
-            }
-            
-            function setupJotFormCommunication() {
-                window.addEventListener('message', function(event) {
-                    if (!event.data) return;
-                    
-                    var data = event.data;
-                    if (typeof data === 'string') {
-                        try {
-                            data = JSON.parse(data);
-                        } catch (e) {
-                            return;
-                        }
-                    }
-                    
-                    if (data.type === 'get' || data.type === 'widget-get-value') {
-                        try {
-                            event.source.postMessage(JSON.stringify({
-                                type: 'value',
-                                value: widgetValue
-                            }), event.origin);
-                        } catch (e) {
-                            console.log('Response error:', e);
-                        }
-                    }
-                });
+                // Send ready signal to JotForm immediately
+                sendReadySignal();
                 
-                setTimeout(function() {
-                    try {
-                        window.parent.postMessage(JSON.stringify({
-                            type: 'ready'
-                        }), '*');
-                    } catch (e) {
-                        console.log('Ready signal error:', e);
-                    }
-                }, 100);
+                console.log('Widget initialization complete');
             }
             
             function setApiKey(key) {
@@ -444,6 +400,7 @@
                 isConfigured = true;
                 updateApiStatus();
                 enableWidget();
+                console.log('API key configured successfully');
             }
             
             function updateApiStatus() {
@@ -478,8 +435,10 @@
                 
                 saveBtn.innerHTML = '<div class="w3w-loading"></div>';
                 
+                // Test API key with a known valid address
                 fetch('https://api.what3words.com/v3/convert-to-coordinates?words=index.home.raft&key=' + apiKeyValue + '&format=json')
                     .then(function(response) {
+                        console.log('API key validation response status:', response.status);
                         if (response.status === 401) {
                             throw new Error('Invalid API key - please check your key from what3words.com/developers');
                         }
@@ -492,12 +451,14 @@
                         return response.json();
                     })
                     .then(function(data) {
+                        console.log('API key validation successful:', data);
                         localStorage.setItem('what3words_api_key', apiKeyValue);
                         setApiKey(apiKeyValue);
                         closeConfigModal();
                         showToast('API key configured successfully!');
                     })
                     .catch(function(error) {
+                        console.error('API key validation failed:', error);
                         showConfigError(error.message);
                     })
                     .finally(function() {
@@ -528,7 +489,7 @@
                 
                 debounceTimer = setTimeout(function() {
                     handleInput();
-                }, 300);
+                }, 300); // 300ms debounce
             }
             
             function handleInput() {
@@ -538,6 +499,8 @@
                 }
                 
                 var value = input.value.trim();
+                console.log('Input value:', value, 'Length:', value.length);
+                
                 if (value.length < 3) {
                     suggestions.style.display = 'none';
                     return;
@@ -547,6 +510,49 @@
                 getSuggestions(value, requestId);
             }
             
+            function handleDirectEntry() {
+                var value = input.value.trim();
+                if (value && value.split('.').length === 3) {
+                    // User typed what looks like a complete three-word address
+                    validateAndSubmitAddress(value);
+                }
+            }
+            
+            function validateAndSubmitAddress(words) {
+                if (!apiKey) {
+                    showConfigError('API key not configured');
+                    return;
+                }
+                
+                console.log('Validating direct entry:', words);
+                
+                fetch('https://api.what3words.com/v3/convert-to-coordinates?words=' + encodeURIComponent(words) + '&key=' + apiKey + '&format=json')
+                    .then(function(response) {
+                        return response.json();
+                    })
+                    .then(function(data) {
+                        if (data.coordinates) {
+                            var locationData = {
+                                words: words,
+                                country: data.country,
+                                nearestPlace: data.nearestPlace,
+                                coordinates: {
+                                    lat: data.coordinates.lat,
+                                    lng: data.coordinates.lng
+                                }
+                            };
+                            
+                            showConfirmation(locationData);
+                            sendValueToJotForm(words);
+                        } else {
+                            console.error('Invalid address:', words);
+                        }
+                    })
+                    .catch(function(error) {
+                        console.error('Direct validation failed:', error);
+                    });
+            }
+            
             function getSuggestions(query, requestId) {
                 if (!apiKey) {
                     suggestions.innerHTML = '<div class="w3w-suggestion">Please configure your API key first</div>';
@@ -554,6 +560,7 @@
                     return;
                 }
                 
+                console.log('Getting suggestions for:', query);
                 suggestions.innerHTML = '<div class="w3w-suggestion">Loading suggestions...</div>';
                 suggestions.style.display = 'block';
                 
@@ -561,12 +568,14 @@
                 
                 fetch(url)
                     .then(function(response) {
+                        console.log('Autosuggest response status:', response.status);
                         if (!response.ok) {
                             throw new Error('API request failed: ' + response.status);
                         }
                         return response.json();
                     })
                     .then(function(data) {
+                        console.log('Autosuggest response:', data);
                         if (requestId !== lastRequestId) return;
                         
                         if (data.error) {
@@ -580,6 +589,7 @@
                         }
                     })
                     .catch(function(error) {
+                        console.error('Autosuggest error:', error);
                         if (requestId !== lastRequestId) return;
                         suggestions.innerHTML = '<div class="w3w-suggestion">Connection error: ' + error.message + '</div>';
                         suggestions.style.display = 'block';
@@ -587,6 +597,7 @@
             }
             
             function renderSuggestions(items) {
+                console.log('Rendering', items.length, 'suggestions');
                 suggestions.innerHTML = '';
                 
                 for (var i = 0; i < items.length; i++) {
@@ -618,9 +629,11 @@
             }
             
             function selectSuggestion(item) {
+                console.log('Selected suggestion:', item.words);
                 input.value = item.words;
                 suggestions.style.display = 'none';
                 
+                // Get detailed coordinates
                 var url = 'https://api.what3words.com/v3/convert-to-coordinates?words=' + encodeURIComponent(item.words) + '&key=' + apiKey + '&format=json';
                 
                 fetch(url)
@@ -639,21 +652,16 @@
                                 }
                             };
                             
-                            var dataString = JSON.stringify(locationData);
                             showConfirmation(locationData);
-                            sendData(dataString);
+                            // Send the three-word address string to JotForm
+                            sendValueToJotForm(item.words);
                         }
                     })
                     .catch(function(error) {
-                        var basicData = { 
-                            words: item.words, 
-                            country: item.country, 
-                            nearestPlace: item.nearestPlace 
-                        };
-                        
-                        var dataString = JSON.stringify(basicData);
-                        showConfirmation(basicData);
-                        sendData(dataString);
+                        console.error('Coordinates lookup failed:', error);
+                        // Fallback: send basic data
+                        showConfirmation(item);
+                        sendValueToJotForm(item.words);
                     });
             }
             
@@ -667,18 +675,12 @@
                 confirmation.style.display = 'block';
             }
             
+            // Initialize when DOM is ready
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', init);
             } else {
                 init();
             }
-            
-            return {
-                init: init,
-                getWidgetValue: getWidgetValue,
-                setWidgetValue: setWidgetValue,
-                validateWidget: validateWidget
-            };
         })();
     </script>
 </body>
